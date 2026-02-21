@@ -8,14 +8,14 @@ const project = new typescript.TypeScriptProject({
   typescriptVersion: '5.9.x',
   repository: 'https://github.com/gammarers-labs/safe-env-getter.git',
   releaseToNpm: true,
-  // npmTrustedPublishing: true,
+  npmTrustedPublishing: true,
   npmAccess: javascript.NpmAccess.PUBLIC,
   minNodeVersion: '20.0.0',
   workflowNodeVersion: '24.x',
   depsUpgradeOptions: {
     workflowOptions: {
       labels: ['auto-approve', 'auto-merge'],
-      // schedule: javascript.UpgradeDependenciesSchedule.WEEKLY,
+      schedule: javascript.UpgradeDependenciesSchedule.WEEKLY,
     },
   },
   githubOptions: {
