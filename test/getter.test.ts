@@ -2,6 +2,11 @@ import { SafeEnvGetter, SafeEnvType } from '../src';
 
 describe('SafeEnvGetter.getEnv', () => {
   describe('string', () => {
+    test('should default to String type when spec omitted', () => {
+      process.env.TEST_STR = 'hello';
+      expect(SafeEnvGetter.getEnv('TEST_STR')).toBe('hello');
+      delete process.env.TEST_STR;
+    });
     test('should return value when set', () => {
       process.env.TEST_STR = 'test';
       expect(SafeEnvGetter.getEnv('TEST_STR', SafeEnvType.String)).toBe('test');
@@ -9,7 +14,7 @@ describe('SafeEnvGetter.getEnv', () => {
     });
     test('should return default when missing', () => {
       delete process.env.TEST_STR;
-      expect(SafeEnvGetter.getEnv('TEST_STR', { ...SafeEnvType.String, default: 'fallback' })).toBe('fallback');
+      expect(SafeEnvGetter.getEnv('TEST_STR', SafeEnvType.String, { default: 'fallback' })).toBe('fallback');
     });
     test('should throw when missing and no default', () => {
       delete process.env.TEST_STR;
@@ -27,7 +32,7 @@ describe('SafeEnvGetter.getEnv', () => {
     });
     test('should return default when missing', () => {
       delete process.env.TEST_NUM;
-      expect(SafeEnvGetter.getEnv('TEST_NUM', { ...SafeEnvType.Number, default: 100 })).toBe(100);
+      expect(SafeEnvGetter.getEnv('TEST_NUM', SafeEnvType.Number, { default: 100 })).toBe(100);
     });
     test('should throw when value is not a number', () => {
       process.env.TEST_NUM = 'not-a-number';
@@ -61,7 +66,7 @@ describe('SafeEnvGetter.getEnv', () => {
     });
     test('should return default when missing', () => {
       delete process.env.TEST_BOOL;
-      expect(SafeEnvGetter.getEnv('TEST_BOOL', { ...SafeEnvType.Boolean, default: true })).toBe(true);
+      expect(SafeEnvGetter.getEnv('TEST_BOOL', SafeEnvType.Boolean, { default: true })).toBe(true);
     });
     test('should throw when missing and no default', () => {
       delete process.env.TEST_BOOL;
@@ -80,7 +85,7 @@ describe('SafeEnvGetter.getEnv', () => {
     });
     test('should return default when missing', () => {
       delete process.env.TEST_ENUM;
-      expect(SafeEnvGetter.getEnv('TEST_ENUM', { ...SafeEnvType.Enum(choices), default: 'a' })).toBe('a');
+      expect(SafeEnvGetter.getEnv('TEST_ENUM', SafeEnvType.Enum(choices), { default: 'a' })).toBe('a');
     });
     test('should throw when value is not in choices', () => {
       process.env.TEST_ENUM = 'x';
