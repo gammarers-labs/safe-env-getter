@@ -4,15 +4,17 @@
 [![npm downloads](https://img.shields.io/npm/dm/safe-env-getter.svg)](https://www.npmjs.com/package/safe-env-getter)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-Type-safe environment variable getter for Node.js. Reads and parses `process.env` with a spec (string, number, boolean, enum), optional defaults, and clear errors when required variables are missing or invalid.
+Type-safe environment variable getter for Node.js. Reads and parses `process.env` with specs (`string`, `number`, `boolean`, `enum`), optional defaults, and structured validation errors when values are missing or invalid.
 
 ## Features
 
 - **Typed specs**: `string`, `number`, `boolean`, and `enum` with TypeScript inference
-- **Optional defaults**: Fallback values when the variable is unset or empty
-- **Strict validation**: Throws `SafeEnvGetterValidationError` with structured errors
-- **Boolean parsing**: Accepts `1`, `true`, `yes`, `on` (case-insensitive) as `true`
-- **Enum constraint**: Restricts values to a fixed set of choices
+- **Strict decimal integers**: `SafeEnvType.Number` rejects whitespace-only, hex (`0x10`), `Infinity`, `NaN`, floats, exponents, and other non-integer forms
+- **Optional defaults**: Fallback when a variable is unset or empty (`""`)
+- **Batch parsing**: `getEnvs()` evaluates every key and throws once with all validation errors
+- **Structured errors**: `SafeEnvGetterValidationError` exposes `errors` (`key`, `message`, `raw`, `kind`) and `keys`
+- **Boolean parsing**: `1`, `true`, `yes`, `on` (case-insensitive) → `true`; any other non-empty value → `false`
+- **Enum constraint**: Values must match one of the allowed choices
 
 ## Installation
 
@@ -33,31 +35,36 @@ yarn add safe-env-getter
 ```ts
 import { SafeEnvGetter, SafeEnvGetterValidationError, SafeEnvType } from 'safe-env-getter';
 
-// String (spec omitted → defaults to SafeEnvType.String; throws if missing)
+// String (spec omitted → SafeEnvType.String; throws if missing)
 const nodeEnv = SafeEnvGetter.getEnv('NODE_ENV');
 
-// String with default (3rd arg: options)
+// String with default (used when unset or empty)
 const logLevel = SafeEnvGetter.getEnv('LOG_LEVEL', SafeEnvType.String, { default: 'info' });
 
-// Number with default
+// Strict decimal integer (e.g. port, worker count)
 const port = SafeEnvGetter.getEnv('PORT', SafeEnvType.Number, { default: 3000 });
+// Valid: "42", "-1", "  42  " (trimmed)
+// Invalid: "   ", "Infinity", "0x10", "3.14", "+42", "1e5"
 
-// Boolean (parses 1/true/yes/on as true)
+// Boolean (1/true/yes/on → true; other non-empty values → false)
 const debug = SafeEnvGetter.getEnv('DEBUG', SafeEnvType.Boolean, { default: false });
 
-// Enum (required)
+// Enum (value must be in choices)
 const mode = SafeEnvGetter.getEnv('MODE', SafeEnvType.Enum(['read', 'write'] as const));
-// Enum with default
-const modeWithDefault = SafeEnvGetter.getEnv('MODE', SafeEnvType.Enum(['read', 'write'] as const), { default: 'read' });
+const modeWithDefault = SafeEnvGetter.getEnv(
+  'MODE',
+  SafeEnvType.Enum(['read', 'write'] as const),
+  { default: 'read' },
+);
 
-// Read multiple envs at once (collects all missing/invalid errors and throws once)
+// Read multiple env vars at once (collects all errors, then throws once)
 const envs = SafeEnvGetter.getEnvs({
   PORT: [SafeEnvType.Number, { default: 3000 }],
   DEBUG: [SafeEnvType.Boolean, { default: false }],
   MODE: SafeEnvType.Enum(['read', 'write'] as const),
 });
 
-// Access structured validation errors
+// Handle structured validation errors
 try {
   SafeEnvGetter.getEnvs({
     PORT: SafeEnvType.Number,
@@ -67,6 +74,7 @@ try {
   if (e instanceof SafeEnvGetterValidationError) {
     // e.errors: [{ key, message, raw?, kind }, ...]
     // e.keys:  ['PORT', 'MODE', ...]
+    // kind: 'missing' | 'invalid_number' | 'invalid_enum'
     console.error(e.errors);
   }
   throw e;
@@ -79,33 +87,52 @@ try {
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| **key**  | Yes      | Environment variable name (e.g. `"PORT"`, `"NODE_ENV"`). |
-| **spec** | No       | Type spec; defaults to `SafeEnvType.String` when omitted. Use `SafeEnvType.String`, `SafeEnvType.Number`, `SafeEnvType.Boolean`, or `SafeEnvType.Enum(choices)`. |
-| **options** | No    | Optional object. Use `{ default: value }` to provide a fallback when the variable is missing or empty. |
+| **key** | Yes | Environment variable name (e.g. `"PORT"`, `"NODE_ENV"`). |
+| **spec** | No | Type spec; defaults to `SafeEnvType.String`. Use `SafeEnvType.String`, `SafeEnvType.Number`, `SafeEnvType.Boolean`, or `SafeEnvType.Enum(choices)`. |
+| **options** | No | `{ default: value }` — used when the variable is **unset** or **empty** (`""`). |
 
 ### `SafeEnvGetter.getEnvs(schema)`
 
 `schema` is an object where each key is an env var name and each value is either:
 
 - A spec (e.g. `SafeEnvType.Number`)
-- A tuple of `[spec, { default }]` (e.g. `[SafeEnvType.Number, { default: 3000 }]`)
+- A tuple `[spec, { default }]` (e.g. `[SafeEnvType.Number, { default: 3000 }]`)
 
-**Spec types:**
+Evaluates every entry in `schema`. If any value is missing, empty without a default, or invalid, throws a single `SafeEnvGetterValidationError` containing all issues.
 
-| Spec | Shape | Description |
-|------|--------|-------------|
-| `string`  | `{ type: 'string' }` | Raw string value. |
-| `number`  | `{ type: 'number' }` | Parsed with `Number()`; throws if NaN. |
-| `boolean` | `{ type: 'boolean' }` | `1`/`true`/`yes`/`on` (case-insensitive) → `true`, else `false`. |
-| `enum`    | `{ type: 'enum', choices: readonly T[] }` | Value must be in `choices`; throws otherwise. |
+### Spec types
 
-**Errors:**
+| Spec | Constant | Description |
+|------|----------|-------------|
+| `string` | `SafeEnvType.String` | Raw string value (no parsing). |
+| `number` | `SafeEnvType.Number` | Strict decimal integer (see below). |
+| `boolean` | `SafeEnvType.Boolean` | `1` / `true` / `yes` / `on` (case-insensitive) → `true`; otherwise → `false`. |
+| `enum` | `SafeEnvType.Enum(choices)` | Value must be in `choices`. |
 
-- Missing/empty without a default: `Missing required environment variable: <key>`.
-- For `number`, invalid values: `Env <key>: expected number, got "<raw>"`.
-- For `enum`, invalid values: `Env <key>: must be one of [choice1, choice2, ...]`.
+#### `SafeEnvType.Number` (strict decimal integer)
 
-Both `getEnv()` and `getEnvs()` throw `SafeEnvGetterValidationError`, which exposes structured data:
+- Trims leading/trailing whitespace before validation.
+- Allows optional leading `-` and one or more digits (e.g. `42`, `-1`, `007`).
+- **Accepted examples**: `"3000"`, `"  42  "`, `"-1"`
+- **Rejected examples**: `"   "` (whitespace-only), `"Infinity"`, `"0x10"`, `"3.14"`, `"NaN"`, `"+42"`, `"1e5"`
+
+Unset or empty (`""`) values use `options.default` when provided; otherwise `kind: 'missing'`.
+
+### Validation errors
+
+| `kind` | When |
+|--------|------|
+| `missing` | Variable unset or empty without a default. |
+| `invalid_number` | Value is not a strict decimal integer. |
+| `invalid_enum` | Value is not in `choices`. |
+
+**Message formats:**
+
+- Missing: `Missing required environment variable: <key>`
+- Number: `Env <key>: expected number, got "<raw>"`
+- Enum: `Env <key>: must be one of [choice1, choice2, ...]`
+
+`SafeEnvGetterValidationError` fields:
 
 - `errors`: `[{ key, message, raw?, kind }, ...]`
 - `keys`: `['KEY1', 'KEY2', ...]`
