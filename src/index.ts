@@ -6,10 +6,38 @@ export type SafeEnvTypeString = { type: 'string'; default?: string };
 
 /**
  * Spec for a numeric environment variable.
- * Values are parsed with `Number()`; invalid values throw.
+ * Values must be decimal integers (optional leading `-`); whitespace-only, hex,
+ * `Infinity`, `NaN`, and non-integer forms throw.
  * The default value is passed via the third argument of `getEnv`, not in the spec.
  */
 export type SafeEnvTypeNumber = { type: 'number'; default?: number };
+
+/**
+ * Pattern for strict decimal integer env values.
+ * Allows an optional leading `-` followed by one or more digits.
+ * Rejects hex (`0x…`), floats, exponents, `Infinity`, `NaN`, and signs other than leading `-`.
+ */
+const STRICT_INTEGER_PATTERN = /^-?\d+$/;
+
+/**
+ * Parses a string as a finite decimal integer for environment variables.
+ *
+ * Trims leading and trailing whitespace before validation. Whitespace-only input is invalid.
+ *
+ * @param raw - Raw environment variable value.
+ * @returns Parsed integer, or `undefined` when the value is not a valid decimal integer.
+ */
+const parseStrictInteger = (raw: string): number | undefined => {
+  const trimmed = raw.trim();
+  if (trimmed === '' || !STRICT_INTEGER_PATTERN.test(trimmed)) {
+    return undefined;
+  }
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || !Number.isInteger(n)) {
+    return undefined;
+  }
+  return n;
+};
 
 /**
  * Spec for a boolean environment variable.
@@ -35,19 +63,27 @@ export type SafeEnvSpec =
   | SafeEnvTypeEnum;
 
 /**
- * Discriminated union error kinds emitted during env parsing/validation.
+ * Discriminated union of error kinds emitted during environment variable parsing.
+ *
+ * - `missing` — Variable unset or empty string without a default.
+ * - `invalid_number` — Value is not a strict decimal integer (see `SafeEnvTypeNumber`).
+ * - `invalid_enum` — Value is not one of the allowed enum choices.
  */
 export type SafeEnvErrorKind = 'missing' | 'invalid_number' | 'invalid_enum';
 
 /**
- * A structured validation error entry for a single env var.
+ * A structured validation error entry for a single environment variable.
  *
  * @template K - Environment variable key type.
  */
 export type SafeEnvError<K extends string = string> = {
+  /** Environment variable name. */
   key: K;
+  /** Human-readable error message. */
   message: string;
+  /** Raw value from `process.env`, if present. */
   raw?: string;
+  /** Error category for programmatic handling. */
   kind: SafeEnvErrorKind;
 };
 
@@ -66,6 +102,9 @@ export type SafeEnvError<K extends string = string> = {
  * ```
  */
 export abstract class SafeEnvGetterError extends Error {
+  /**
+   * @param message - Error message.
+   */
   protected constructor(message: string) {
     super(message);
     this.name = 'SafeEnvGetterError';
@@ -75,12 +114,18 @@ export abstract class SafeEnvGetterError extends Error {
 /**
  * Validation error that carries one or more environment variable issues.
  *
- * It is thrown by `SafeEnvGetter.getEnv()` (single-entry `errors`) and
+ * Thrown by `SafeEnvGetter.getEnv()` (single-entry `errors`) and
  * `SafeEnvGetter.getEnvs()` (multi-entry `errors`).
+ *
+ * @template K - Union of environment variable keys included in `errors`.
  */
 export class SafeEnvGetterValidationError<K extends string = string> extends SafeEnvGetterError {
   /**
    * Formats validation errors into a human-readable error message.
+   *
+   * @template K - Environment variable key type.
+   * @param errors - Validation error entries to format.
+   * @returns Multi-line summary listing each key and message.
    */
   public static format<K extends string>(errors: readonly SafeEnvError<K>[]): string {
     const lines = errors.map((e) => `- ${e.key}: ${e.message}${e.raw == null ? '' : ` (raw="${e.raw}")`}`);
@@ -98,6 +143,8 @@ export class SafeEnvGetterValidationError<K extends string = string> extends Saf
 
   /**
    * Creates a new validation error from one or more `SafeEnvError` entries.
+   *
+   * @param errors - One or more structured validation errors.
    */
   public constructor(errors: readonly SafeEnvError<K>[]) {
     const msg = SafeEnvGetterValidationError.format(errors);
@@ -113,9 +160,12 @@ export class SafeEnvGetterValidationError<K extends string = string> extends Saf
  * Use the third argument `options: { default: value }` to provide a fallback when the variable is missing.
  */
 export const SafeEnvType = {
-  /** Spec for a string value. */
+  /** Spec for a string value (returned as-is). */
   String: { type: 'string' } as const satisfies SafeEnvTypeString,
-  /** Spec for a numeric value. */
+  /**
+   * Spec for a strict decimal integer.
+   * Rejects whitespace-only, hex, `Infinity`, `NaN`, and non-integer forms.
+   */
   Number: { type: 'number' } as const satisfies SafeEnvTypeNumber,
   /** Spec for a boolean value (1/true/yes/on → true). */
   Boolean: { type: 'boolean' } as const satisfies SafeEnvTypeBoolean,
@@ -139,7 +189,9 @@ export type SafeEnvSpecToType<S> =
           : never;
 
 /**
- * Options for reading an env var with an optional default.
+ * Options for reading an environment variable with an optional default.
+ *
+ * @template S - Environment variable spec type.
  */
 export type SafeGetEnvOptions<S extends SafeEnvSpec> = { default?: SafeEnvSpecToType<S> };
 
@@ -157,10 +209,13 @@ export type SafeEnvSchemaEntry<S extends SafeEnvSpec = SafeEnvSpec> = S | readon
  */
 export type SafeEnvSchema = Record<string, SafeEnvSchemaEntry>;
 
+/** Extracts the spec type from a schema entry or `[spec, options]` tuple. */
 type SafeEnvSchemaEntryToSpec<E> = E extends readonly [infer S, unknown] ? S : E;
 
 /**
- * Maps a schema object to the resulting parsed env object type.
+ * Maps a schema object to the resulting parsed environment object type.
+ *
+ * @template TSchema - Schema object type passed to `getEnvs`.
  */
 export type SafeEnvSchemaToType<TSchema extends SafeEnvSchema> = {
   [K in keyof TSchema]: SafeEnvSpecToType<SafeEnvSchemaEntryToSpec<TSchema[K]> & SafeEnvSpec>;
@@ -168,13 +223,17 @@ export type SafeEnvSchemaToType<TSchema extends SafeEnvSchema> = {
 
 /**
  * Reads and parses an environment variable according to the given spec.
- * If the variable is missing or empty and no default is provided in `options`, throws an error.
  *
+ * Missing or empty (`""`) values use `options.default` when provided; otherwise an error is thrown.
+ * For `SafeEnvType.Number`, values are parsed as strict decimal integers (see `SafeEnvTypeNumber`).
+ *
+ * @template K - Environment variable key type.
+ * @template S - Environment variable spec type.
  * @param key - Environment variable name (e.g. `"PORT"`, `"NODE_ENV"`).
  * @param spec - Type spec; defaults to `SafeEnvType.String` when omitted.
- * @param options - Optional. Use `{ default: value }` to provide a fallback when the variable is missing.
+ * @param options - Optional. Use `{ default: value }` to provide a fallback when the variable is missing or empty.
  * @returns Parsed value with type inferred from `spec`.
- * @throws {SafeEnvGetterValidationError} When the variable is missing/invalid and `options.default` is not set (or not applicable).
+ * @throws {SafeEnvGetterValidationError} When the variable is missing, empty without a default, or invalid for the spec.
  */
 function getEnv<K extends string, S extends SafeEnvSpec = SafeEnvTypeString>(
   key: K,
@@ -196,8 +255,8 @@ function getEnv<K extends string, S extends SafeEnvSpec = SafeEnvTypeString>(
 
   switch (spec.type) {
     case 'number': {
-      const n = Number(raw);
-      if (Number.isNaN(n)) {
+      const n = parseStrictInteger(raw);
+      if (n === undefined) {
         throw new SafeEnvGetterValidationError([
           { key, message: `Env ${key}: expected number, got "${raw}"`, raw, kind: 'invalid_number' },
         ]);
@@ -221,12 +280,14 @@ function getEnv<K extends string, S extends SafeEnvSpec = SafeEnvTypeString>(
 /**
  * Reads and parses multiple environment variables according to the given schema.
  *
- * This function always evaluates every key in `schema`. If any missing/invalid values
- * are found, it throws once with a `SafeEnvGetterValidationError` that contains all issues.
+ * Always evaluates every key in `schema`. Collects all validation errors and throws once
+ * with a `SafeEnvGetterValidationError` that contains every issue.
+ * Number specs use the same strict decimal integer rules as `getEnv`.
  *
- * @param schema - Map of env var names to specs, optionally with per-key defaults via `[spec, { default }]`.
- * @returns An object of parsed envs with types inferred from the schema.
- * @throws {SafeEnvGetterValidationError} When one or more required env vars are missing or invalid.
+ * @template TSchema - Schema object type.
+ * @param schema - Map of environment variable names to specs, optionally with per-key defaults via `[spec, { default }]`.
+ * @returns Parsed environment object with types inferred from the schema.
+ * @throws {SafeEnvGetterValidationError} When one or more variables are missing, empty without a default, or invalid.
  */
 const getEnvs = <TSchema extends SafeEnvSchema>(schema: TSchema): SafeEnvSchemaToType<TSchema> => {
   const envs: Partial<SafeEnvSchemaToType<TSchema>> = {};
@@ -251,8 +312,8 @@ const getEnvs = <TSchema extends SafeEnvSchema>(schema: TSchema): SafeEnvSchemaT
     }
 
     if (spec.type === 'number') {
-      const n = Number(raw);
-      if (Number.isNaN(n)) {
+      const n = parseStrictInteger(raw);
+      if (n === undefined) {
         errors.push({ key, message: `Env ${key}: expected number, got "${raw}"`, raw, kind: 'invalid_number' });
         continue;
       }
@@ -287,10 +348,20 @@ const getEnvs = <TSchema extends SafeEnvSchema>(schema: TSchema): SafeEnvSchemaT
 };
 
 /**
- * Safe environment variable getter.
- * Use `SafeEnvGetter.getEnv(key, spec?, options?)` to read and parse environment variables with type safety.
+ * Type-safe environment variable getter for Node.js `process.env`.
+ *
+ * @example
+ * ```ts
+ * const port = SafeEnvGetter.getEnv('PORT', SafeEnvType.Number);
+ * const envs = SafeEnvGetter.getEnvs({
+ *   PORT: SafeEnvType.Number,
+ *   DEBUG: [SafeEnvType.Boolean, { default: false }],
+ * });
+ * ```
  */
 export const SafeEnvGetter = {
+  /** Reads and parses a single environment variable. See {@link getEnv}. */
   getEnv,
+  /** Reads and parses multiple environment variables. See {@link getEnvs}. */
   getEnvs,
 } as const;
