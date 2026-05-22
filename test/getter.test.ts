@@ -126,6 +126,40 @@ describe('SafeEnvGetter.getEnv', () => {
       );
       unsetEnv('TEST_NUM');
     });
+
+    test('should reject when Number.isFinite returns false for digit string', () => {
+      const isFiniteSpy = jest.spyOn(Number, 'isFinite').mockReturnValue(false);
+      setEnv('TEST_NUM', '42');
+      expectGetEnvValidationError(
+        () => SafeEnvGetter.getEnv('TEST_NUM', SafeEnvType.Number),
+        'TEST_NUM',
+        {
+          key: 'TEST_NUM',
+          message: 'Env TEST_NUM: expected number, got "42"',
+          raw: '42',
+          kind: 'invalid_number',
+        },
+      );
+      isFiniteSpy.mockRestore();
+      unsetEnv('TEST_NUM');
+    });
+
+    test('should reject when Number.isInteger returns false for digit string', () => {
+      const isIntegerSpy = jest.spyOn(Number, 'isInteger').mockReturnValue(false);
+      setEnv('TEST_NUM', '42');
+      expectGetEnvValidationError(
+        () => SafeEnvGetter.getEnv('TEST_NUM', SafeEnvType.Number),
+        'TEST_NUM',
+        {
+          key: 'TEST_NUM',
+          message: 'Env TEST_NUM: expected number, got "42"',
+          raw: '42',
+          kind: 'invalid_number',
+        },
+      );
+      isIntegerSpy.mockRestore();
+      unsetEnv('TEST_NUM');
+    });
   });
 
   describe('boolean', () => {
@@ -327,5 +361,41 @@ describe('SafeEnvGetter.getEnvs', () => {
 
     unsetEnv('TEST_WORKERS');
     unsetEnv('TEST_MODE');
+  });
+
+  test('should parse boolean values when set in process.env', () => {
+    setEnv('TEST_DEBUG', 'true');
+    setEnv('TEST_VERBOSE', '0');
+
+    const envs = SafeEnvGetter.getEnvs({
+      TEST_DEBUG: SafeEnvType.Boolean,
+      TEST_VERBOSE: SafeEnvType.Boolean,
+    });
+
+    expect(envs).toEqual({
+      TEST_DEBUG: true,
+      TEST_VERBOSE: false,
+    });
+
+    unsetEnv('TEST_DEBUG');
+    unsetEnv('TEST_VERBOSE');
+  });
+
+  test('should parse valid enum and string values', () => {
+    setEnv('TEST_MODE', 'write');
+    setEnv('TEST_LABEL', 'my-app');
+
+    const envs = SafeEnvGetter.getEnvs({
+      TEST_MODE: SafeEnvType.Enum(['read', 'write'] as const),
+      TEST_LABEL: SafeEnvType.String,
+    });
+
+    expect(envs).toEqual({
+      TEST_MODE: 'write',
+      TEST_LABEL: 'my-app',
+    });
+
+    unsetEnv('TEST_MODE');
+    unsetEnv('TEST_LABEL');
   });
 });
