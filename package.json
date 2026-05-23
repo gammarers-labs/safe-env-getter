@@ -1,5 +1,6 @@
 {
   "name": "safe-env-getter",
+  "description": "Type-safe environment variable getter for Node.js. Reads and parses process.env with specs (string, number, boolean, enum), optional defaults, and structured validation errors when values are missing or invalid.",
   "repository": {
     "type": "git",
     "url": "https://github.com/gammarers-labs/safe-env-getter.git"
@@ -47,6 +48,13 @@
     "ts-node": "^10.9.2",
     "typescript": "5.9.x"
   },
+  "keywords": [
+    "env",
+    "environment",
+    "getter",
+    "safe",
+    "variables"
+  ],
   "engines": {
     "node": ">= 20.0.0"
   },

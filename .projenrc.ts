@@ -7,6 +7,8 @@ const project = new typescript.TypeScriptProject({
   authorEmail: 'yicr@users.noreply.github.com',
   typescriptVersion: '5.9.x',
   repository: 'https://github.com/gammarers-labs/safe-env-getter.git',
+  description: 'Type-safe environment variable getter for Node.js. Reads and parses process.env with specs (string, number, boolean, enum), optional defaults, and structured validation errors when values are missing or invalid.',
+  keywords: ['environment', 'variables', 'getter', 'safe', 'env'],
   releaseToNpm: true,
   npmTrustedPublishing: true,
   npmAccess: javascript.NpmAccess.PUBLIC,
